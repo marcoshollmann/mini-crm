@@ -257,8 +257,12 @@ function EditPopover({ contact, anchorRect, onClose, onSave }) {
   const ref = useRef()
 
   const isMobilePopover = window.innerWidth < 700
-  const top  = isMobilePopover ? 'auto' : anchorRect.bottom + 8
-  const left = isMobilePopover ? 0 : Math.min(anchorRect.left, window.innerWidth - 340)
+  const POPOVER_H = 260
+  const rawTop = anchorRect.bottom + 8
+  // Clamp so popover never goes below (or above) the viewport
+  const clampedTop = Math.min(rawTop, window.innerHeight - POPOVER_H - 12)
+  const top    = isMobilePopover ? 'auto' : Math.max(clampedTop, 8)
+  const left   = isMobilePopover ? 0 : Math.min(anchorRect.left, window.innerWidth - 340)
   const bottom = isMobilePopover ? 0 : 'auto'
 
   useEffect(() => {
