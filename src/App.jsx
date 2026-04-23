@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, createContext, useContext } from 'react'
+import React, { useState, useEffect, useRef, useCallback, createContext, useContext, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { DotLottieReact } from '@lottiefiles/dotlottie-react'
 import { supabase } from './supabase.js'
@@ -100,6 +100,16 @@ const LIGHT = {
 
 const ThemeCtx = createContext(DARK)
 const useTheme = () => useContext(ThemeCtx)
+
+function useIsMobile() {
+  const [mobile, setMobile] = useState(() => window.innerWidth < 700)
+  useEffect(() => {
+    const fn = () => setMobile(window.innerWidth < 700)
+    window.addEventListener('resize', fn)
+    return () => window.removeEventListener('resize', fn)
+  }, [])
+  return mobile
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -246,8 +256,10 @@ function EditPopover({ contact, anchorRect, onClose, onSave }) {
   const [saving, setSaving] = useState(false)
   const ref = useRef()
 
-  const top  = anchorRect.bottom + 8
-  const left = Math.min(anchorRect.left, window.innerWidth - 340)
+  const isMobilePopover = window.innerWidth < 700
+  const top  = isMobilePopover ? 'auto' : anchorRect.bottom + 8
+  const left = isMobilePopover ? 0 : Math.min(anchorRect.left, window.innerWidth - 340)
+  const bottom = isMobilePopover ? 0 : 'auto'
 
   useEffect(() => {
     function handle(e) { if (ref.current && !ref.current.contains(e.target)) onClose() }
@@ -268,9 +280,11 @@ function EditPopover({ contact, anchorRect, onClose, onSave }) {
 
   return createPortal(
     <div ref={ref} onClick={e => e.stopPropagation()} style={{
-      position: 'fixed', top, left, zIndex: 9999, width: 320,
+      position: 'fixed', top, left, bottom, zIndex: 9999,
+      width: isMobilePopover ? '100%' : 320,
       background: t.surface, border: `1px solid ${t.border}`,
-      borderRadius: 14, padding: '16px',
+      borderRadius: isMobilePopover ? '18px 18px 0 0' : 14,
+      padding: isMobilePopover ? '20px 20px 32px' : '16px',
       boxShadow: t.modalShadow,
       animation: 'popoverIn 0.18s cubic-bezier(0.16,1,0.3,1) forwards',
     }}>
@@ -319,10 +333,12 @@ function EditPopover({ contact, anchorRect, onClose, onSave }) {
 // ── Contact Row ───────────────────────────────────────────────────────────────
 
 function ContactRow({ contact, index, isNew, onUpdate }) {
-  const t = useTheme()
+  const t       = useTheme()
+  const mobile  = useIsMobile()
   const [anchorRect, setAnchorRect] = useState(null)
-  const rowRef = useRef()
-  const isMine = contact.action_owner === 'mine'
+  const rowRef  = useRef()
+  const isMine  = contact.action_owner === 'mine'
+  const person  = getPerson(contact.responsible)
 
   const baseBg  = isMine ? t.amberDim      : t.waitDim
   const hoverBg = isMine ? t.amberDimHover : t.waitDimHover
@@ -332,6 +348,72 @@ function ContactRow({ contact, index, isNew, onUpdate }) {
     setAnchorRect(rowRef.current.getBoundingClientRect())
   }
 
+  // ── Mobile card ──────────────────────────────────────────────────────────
+  if (mobile) {
+    return (
+      <>
+        <div ref={rowRef} onClick={handleRowClick} style={{
+          animation: `fadeInRow 0.4s cubic-bezier(0.16,1,0.3,1) ${isNew ? 0 : index * 45}ms both`,
+          position: 'relative',
+          padding: '14px 16px 14px 20px',
+          background: baseBg,
+          borderBottom: `1px solid ${t.border}55`,
+          cursor: 'pointer', transition: 'background 0.15s', userSelect: 'none',
+        }}
+          onMouseEnter={e => e.currentTarget.style.background = hoverBg}
+          onMouseLeave={e => e.currentTarget.style.background = baseBg}
+        >
+          {/* Left bar */}
+          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: isMine ? t.amber : t.cyan }} />
+
+          {/* Row 1: avatar + name + category */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <Avatar url={contact.avatar_url} name={contact.full_name} size={38} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 15, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {contact.full_name || '–'}
+              </div>
+              <div style={{ fontSize: 12, color: t.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
+                {contact.headline || '–'}
+              </div>
+            </div>
+            <CategoryBadge value={contact.category} />
+          </div>
+
+          {/* Row 2: next action */}
+          <div style={{ fontSize: 13, color: t.text2, marginBottom: 8, paddingLeft: 48,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {contact.next_action || <span style={{ color: t.muted2, fontStyle: 'italic' }}>Sem ação definida</span>}
+          </div>
+
+          {/* Row 3: action badge + responsible + company + time */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 48, flexWrap: 'wrap' }}>
+            <ActionBadge owner={contact.action_owner} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <img src={person.avatar} alt={person.name} width={20} height={20}
+                style={{ borderRadius: '50%', objectFit: 'cover' }} />
+              <span style={{ fontSize: 12, color: t.muted }}>{person.short}</span>
+            </div>
+            {contact.company && (
+              <span style={{ fontSize: 12, color: t.muted }}>· {contact.company}</span>
+            )}
+            <span style={{ fontSize: 11, color: t.muted2, marginLeft: 'auto' }}>
+              {timeAgo(contact.updated_at || contact.created_at)}
+            </span>
+          </div>
+        </div>
+
+        {anchorRect && (
+          <EditPopover contact={contact} anchorRect={anchorRect}
+            onClose={() => setAnchorRect(null)}
+            onSave={updated => { onUpdate(updated); setAnchorRect(null) }}
+          />
+        )}
+      </>
+    )
+  }
+
+  // ── Desktop row ──────────────────────────────────────────────────────────
   return (
     <>
       <div ref={rowRef} onClick={handleRowClick} style={{
@@ -346,10 +428,7 @@ function ContactRow({ contact, index, isNew, onUpdate }) {
         onMouseEnter={e => e.currentTarget.style.background = hoverBg}
         onMouseLeave={e => e.currentTarget.style.background = baseBg}
       >
-        <div style={{
-          position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
-          background: isMine ? t.amber : t.cyan,
-        }} />
+        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: isMine ? t.amber : t.cyan }} />
 
         <Avatar url={contact.avatar_url} name={contact.full_name} size={44} />
 
@@ -373,20 +452,12 @@ function ContactRow({ contact, index, isNew, onUpdate }) {
           <ActionBadge owner={contact.action_owner} />
         </div>
 
-        {/* Responsável */}
         <div style={{ flex: '0 0 120px', display: 'flex', alignItems: 'center', gap: 8 }}>
-          {(() => {
-            const person = getPerson(contact.responsible)
-            return (
-              <>
-                <img src={person.avatar} alt={person.name} width={26} height={26}
-                  style={{ borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
-                <span style={{ fontSize: 13, color: t.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {person.short}
-                </span>
-              </>
-            )
-          })()}
+          <img src={person.avatar} alt={person.name} width={26} height={26}
+            style={{ borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+          <span style={{ fontSize: 13, color: t.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {person.short}
+          </span>
         </div>
 
         <div style={{ flex: '0 0 90px', textAlign: 'right', fontSize: 12, color: t.muted2 }}>
@@ -407,8 +478,7 @@ function ContactRow({ contact, index, isNew, onUpdate }) {
       </div>
 
       {anchorRect && (
-        <EditPopover
-          contact={contact} anchorRect={anchorRect}
+        <EditPopover contact={contact} anchorRect={anchorRect}
           onClose={() => setAnchorRect(null)}
           onSave={updated => { onUpdate(updated); setAnchorRect(null) }}
         />
@@ -420,7 +490,8 @@ function ContactRow({ contact, index, isNew, onUpdate }) {
 // ── Add Modal ─────────────────────────────────────────────────────────────────
 
 function AddModal({ onClose, onAdded }) {
-  const t = useTheme()
+  const t      = useTheme()
+  const mobile = useIsMobile()
   const [url,         setUrl]         = useState('')
   const [category,    setCategory]    = useState('investor')
   const [responsible, setResponsible] = useState('eduardo')
@@ -454,14 +525,22 @@ function AddModal({ onClose, onAdded }) {
       style={{
         position: 'fixed', inset: 0, zIndex: 200,
         background: t.overlayBg, backdropFilter: 'blur(8px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        display: 'flex',
+        alignItems: mobile ? 'flex-end' : 'center',
+        justifyContent: 'center',
         animation: 'overlayIn 0.2s ease forwards',
       }}
     >
       <div style={{
-        width: '100%', maxWidth: 480, margin: '0 16px',
+        width: '100%',
+        maxWidth: mobile ? '100%' : 480,
+        maxHeight: mobile ? '100%' : 'auto',
+        margin: mobile ? 0 : '0 16px',
+        alignSelf: mobile ? 'flex-end' : 'center',
         background: t.surface, border: `1px solid ${t.border}`,
-        borderRadius: 18, padding: '28px 28px 24px',
+        borderRadius: mobile ? '18px 18px 0 0' : 18,
+        padding: mobile ? '24px 20px 32px' : '28px 28px 24px',
+        overflowY: mobile ? 'auto' : 'visible',
         boxShadow: t.modalShadow,
         animation: 'fadeScale 0.22s cubic-bezier(0.16,1,0.3,1) forwards',
       }}>
@@ -600,7 +679,9 @@ function EmptyState({ onAdd }) {
 // ── Table Header ──────────────────────────────────────────────────────────────
 
 function TableHeader() {
-  const t = useTheme()
+  const t      = useTheme()
+  const mobile = useIsMobile()
+  if (mobile) return null
   const col = (label, flex, align = 'left') => (
     <div style={{ flex, fontSize: 11, fontWeight: 600, color: t.muted2, letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: align }}>
       {label}
@@ -626,6 +707,7 @@ function TableHeader() {
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
+  const mobile     = useIsMobile()
   const [isDark,    setIsDark]    = useState(true)
   const [contacts,  setContacts]  = useState([])
   const [loading,   setLoading]   = useState(true)
@@ -666,7 +748,7 @@ export default function App() {
         {/* Header */}
         <header style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '18px 32px',
+          padding: mobile ? '14px 16px' : '18px 32px',
           borderBottom: `1px solid ${t.border}`,
           background: t.headerBg,
           backdropFilter: 'blur(12px)',
@@ -703,13 +785,14 @@ export default function App() {
         </header>
 
         {/* Main */}
-        <main style={{ flex: 1, padding: '0 32px 40px' }}>
+        <main style={{ flex: 1, padding: mobile ? '0 0 32px' : '0 32px 40px' }}>
           <div style={{
-            marginTop: 28,
+            marginTop: mobile ? 0 : 28,
             background: t.surface,
-            border: `1px solid ${t.border}`,
-            borderRadius: 16, overflow: 'hidden',
-            boxShadow: t.tableShadow,
+            border: mobile ? 'none' : `1px solid ${t.border}`,
+            borderRadius: mobile ? 0 : 16,
+            overflow: 'hidden',
+            boxShadow: mobile ? 'none' : t.tableShadow,
           }}>
             {loading ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 60, color: t.muted, fontSize: 15 }}>
